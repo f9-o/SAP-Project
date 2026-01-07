@@ -1,24 +1,21 @@
 import streamlit as st
 import streamlit.components.v1 as components
-import pandas as pd
-import time
 
 # الإعدادات العامة للواجهة
 st.set_page_config(page_title="SAUDI PUMPS Control Center", layout="wide")
 
-# تنسيق CSS متقدم
+# تنسيق CSS
 st.markdown("""
     <style>
     .main { background-color: #040605; }
     .stMetric { 
-        background: linear-gradient(135deg, #0d1117 0%, #05140b 100%);
-        border: 1px solid #1a7a4d; border-radius: 10px; padding: 20px;
-        box-shadow: 0 4px 15px rgba(26, 122, 77, 0.2);
+        background-color: #0d1117; 
+        border: 1px solid #1a7a4d; border-radius: 10px; padding: 15px;
     }
-    h1, h2, h3 { color: #f0f6fc; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; text-align: right; }
+    h1, h2, h3 { color: #f0f6fc; font-family: 'Arial'; text-align: right; }
     .status-box { 
         padding: 20px; border-radius: 10px; border: 1px solid #1a7a4d; 
-        background: rgba(5, 20, 11, 0.8); color: #e6edf3; direction: rtl; line-height: 1.8;
+        background: #05140b; color: #e6edf3; direction: rtl; line-height: 1.6;
     }
     </style>
     """, unsafe_allow_html=True)
@@ -26,129 +23,86 @@ st.markdown("""
 if 'dest_level' not in st.session_state: st.session_state.dest_level = 0.0
 
 with st.sidebar:
-    # اللوجو التفاعلي المحدث
-    st.markdown("""
-        <div style="text-align: center;">
-        <svg width="140" height="140" viewBox="0 0 200 200">
-            <circle cx="100" cy="85" r="55" fill="none" stroke="#1a7a4d" stroke-width="6"/>
-            <g transform="translate(100,85)">
-                <path d="M-30 0 L30 0 M0 -30 L0 30" stroke="#ffffff" stroke-width="5">
-                    <animateTransform attributeName="transform" type="rotate" from="0" to="360" dur="3s" repeatCount="indefinite" />
-                </path>
-                <circle r="8" fill="#1a7a4d"/>
-            </g>
-            <text x="100" y="165" fill="#ffffff" font-family="Arial" font-size="20" text-anchor="middle" font-weight="bold">SAUDI PUMPS</text>
-        </svg>
-        </div>
-    """, unsafe_allow_html=True)
+    st.markdown("<h2 style='text-align: center;'>SAUDI PUMPS</h2>", unsafe_allow_html=True)
     st.markdown("---")
-    clog = st.slider("Gate Valve Obstruction (%)", 0, 100, 20)
-    source_level = st.slider("Source Tank Level (m)", 0.0, 5.0, 4.0)
-    if st.button("System Reset"):
+    # التحكم في المحاكاة
+    main_clog = st.slider("إغلاق صمام الخط الرئيسي (Main Line Gate Valve %)", 0, 100, 20)
+    bypass_open = st.checkbox("فتح صمام المسار البديل (Bypass Gate Valve)")
+    t1_level = st.slider("مستوى خزان الإمداد ST-101 (m)", 0.0, 5.0, 4.0)
+    
+    if st.button("إعادة تعيين (Reset System)"):
         st.session_state.dest_level = 0.0
 
-# الحسابات الهندسية
-pump_pwm = min(100.0, 40.0 + (clog * 0.7))
-solenoid_activation = 100.0 if clog > 65 else 0.0
-flow_rate = (12.0 * (1 - clog/100)) + (pump_pwm/100 * 4.0) + (solenoid_activation/100 * 7.0)
+# حسابات التدفق بناءً على التعديلات الهندسية الجديدة
+# المسار الرئيسي يقل بالانسداد، والمسار البديل يضيف تدفقاً إذا فُتح صمام البوابة فيه
+flow_main = 10.0 * (1 - main_clog/100)
+flow_bypass = 8.0 if bypass_open else 0.0
+total_flow = flow_main + flow_bypass
 
-# محاكاة امتلاء الخزان
-st.session_state.dest_level = min(5.0, st.session_state.dest_level + (flow_rate / 2500))
+# تحديث مستوى الخزان الثاني
+st.session_state.dest_level = min(5.0, st.session_state.dest_level + (total_flow / 2000))
 
-# الواجهة الرئيسية
-st.markdown("<h1 style='text-align: center;'>المنصة الوطنية للتحكم الصناعي | SAUDI PUMPS</h1>", unsafe_allow_html=True)
+# العرض العلوي
+st.markdown("<h1 style='text-align: center;'>مركز التحكم والمراقبة المطور | SAUDI PUMPS</h1>", unsafe_allow_html=True)
 
-col1, col2, col3 = st.columns(3)
-col1.metric("Flow Rate (L/m)", f"{flow_rate:.2f}")
-col2.metric("Motor PWM (%)", f"{pump_pwm:.1f}")
-col3.metric("T2 Level (%)", f"{(st.session_state.dest_level/5*100):.1f}")
+c1, c2, c3 = st.columns(3)
+c1.metric("معدل التدفق الكلي (Total Flow)", f"{total_flow:.2f} L/m")
+c2.metric("حالة الخط الرئيسي", "منسد" if main_clog > 80 else "طبيعي")
+c3.metric("مستوى T2", f"{(st.session_state.dest_level/5*100):.1f} %")
 
-# الرسم الهندسي الحي المطور (Animated P&ID)
-def get_advanced_diagram(pwm, clg, sol, s_lvl, d_lvl, f_rate):
-    sol_color = "#1a7a4d" if sol > 0 else "#2d2d2d"
-    flow_speed = max(0.2, 3.0 - (f_rate / 5)) # التحكم في سرعة حركة جزيئات الماء
-    
-    svg = f"""
-    <div style="display: flex; justify-content: center; background: #0d1117; padding: 25px; border-radius: 15px; border: 1px solid #1a7a4d;">
-    <svg width="850" height="380" viewBox="0 0 850 380" xmlns="http://www.w3.org/2000/svg">
-        <defs>
-            <linearGradient id="waterGrad" x1="0%" y1="0%" x2="0%" y2="100%">
-                <stop offset="0%" style="stop-color:#1a7a4d; stop-opacity:0.8" />
-                <stop offset="100%" style="stop-color:#05140b; stop-opacity:1" />
-            </linearGradient>
-            <filter id="glow">
-                <feGaussianBlur stdDeviation="2.5" result="coloredBlur"/>
-                <feMerge><feMergeNode in="coloredBlur"/><feMergeNode in="SourceGraphic"/></feMerge>
-            </filter>
-        </defs>
+# رسم الـ P&ID المطور بجميع الصمامات المطلوبة
+def get_industrial_pid(t1, t2, main_clg, bypass):
+    bp_color = "#00ff88" if bypass else "#444"
+    return f"""
+    <div style="display: flex; justify-content: center; background: #0d1117; padding: 20px; border-radius: 15px; border: 1px solid #1a7a4d;">
+    <svg width="900" height="400" viewBox="0 0 900 400">
+        <rect x="50" y="100" width="80" height="180" fill="none" stroke="#1a7a4d" stroke-width="3"/>
+        <rect x="50" y="{280 - (t1/5*180)}" width="80" height="{(t1/5*180)}" fill="#1a7a4d" opacity="0.5"/>
+        <rect x="75" y="105" width="30" height="8" fill="cyan"/> <text x="40" y="90" fill="#fff" font-size="12">ST-101 (Level Sensor)</text>
 
-        <rect x="50" y="80" width="100" height="200" fill="none" stroke="#1a7a4d" stroke-width="3"/>
-        <rect x="50" y="{280 - (s_lvl/5*200)}" width="100" height="{(s_lvl/5*200)}" fill="url(#waterGrad)" />
-        <text x="50" y="70" fill="#fff" font-size="12" font-weight="bold">ST-101 (T1)</text>
+        <path d="M130 250 H180" stroke="#1a7a4d" stroke-width="4"/>
+        <polygon points="140,240 160,260 160,240 140,260" fill="white" stroke="white"/>
+        <text x="135" y="235" fill="#aaa" font-size="9">Gate V1</text>
 
-        <rect x="700" y="80" width="100" height="200" fill="none" stroke="#1a7a4d" stroke-width="3"/>
-        <rect x="700" y="{280 - (d_lvl/5*200)}" width="100" height="{(d_lvl/5*200)}" fill="url(#waterGrad)" />
-        <text x="700" y="70" fill="#fff" font-size="12" font-weight="bold">ST-102 (T2)</text>
+        <path d="M180 250 H240" stroke="#1a7a4d" stroke-width="4"/>
+        <polygon points="200,240 220,260 220,240 200,260" fill="white" stroke="white"/>
+        <text x="195" y="235" fill="#aaa" font-size="9">Gate V2</text>
 
-        <path d="M150 250 H230 M305 250 H400 V180 H550 M400 250 V310 H550 M550 180 V250 H700 M550 310 V250" 
-              stroke="#2d2d2d" stroke-width="10" fill="none" />
+        <circle cx="280" cy="250" r="30" fill="#05140b" stroke="#fff" stroke-width="2"/>
+        <text x="265" y="255" fill="#fff" font-size="10" font-weight="bold">P-101</text>
+
+        <path d="M310 250 H360" stroke="#1a7a4d" stroke-width="4"/>
+        <polygon points="320,240 340,250 320,260" fill="none" stroke="gold" stroke-width="2"/>
+        <text x="315" y="235" fill="gold" font-size="9">NRV (عدم رجوع)</text>
+
+        <path d="M360 250 H420 V180 H600 M420 250 V320 H600" stroke="#1a7a4d" stroke-width="4" fill="none"/>
         
-        {f'<circle r="3" fill="#00ff88" filter="url(#glow)"><animateMotion dur="{flow_speed}s" repeatCount="indefinite" path="M150 250 H230 M305 250 H400 V180 H550 M550 180 V250 H700" /></circle>' if f_rate > 0 else ''}
-        {f'<circle r="3" fill="#00ff88" filter="url(#glow)"><animateMotion dur="{flow_speed}s" repeatCount="indefinite" path="M400 250 V310 H550 V250" /></circle>' if sol > 0 else ''}
+        <rect x="480" y="170" width="30" height="20" fill="#7a5a1a"/>
+        <text x="460" y="165" fill="#fff" font-size="9">Main Gate V ({main_clg}%)</text>
 
-        <g transform="translate(270, 250)">
-            <circle cx="0" cy="0" r="35" fill="#05140b" stroke="#fff" stroke-width="3" filter="url(#glow)"/>
-            <path d="M-20 0 L20 0 M0 -20 L0 20" stroke="#fff" stroke-width="3">
-                <animateTransform attributeName="transform" type="rotate" from="0" to="360" dur="{1/(pwm/20 + 0.1)}s" repeatCount="indefinite" />
-            </path>
-        </g>
-        <text x="245" y="305" fill="#fff" font-size="11" font-weight="bold">P-101</text>
+        <rect x="480" y="310" width="30" height="20" fill="{bp_color}"/>
+        <text x="460" y="305" fill="{bp_color}" font-size="9">Bypass Gate V</text>
 
-        <rect x="450" y="165" width="40" height="30" fill="#7a5a1a" stroke="#fff" />
-        <text x="440" y="160" fill="#ffcc00" font-size="10">HV (Gate: {clg}%)</text>
-        <rect x="450" y="295" width="40" height="30" fill="{sol_color}" stroke="#fff" />
-        <text x="440" y="290" fill="#00ff88" font-size="10">XV (Solenoid)</text>
+        <path d="M600 180 V250 H720" stroke="#1a7a4d" stroke-width="4" fill="none"/>
+        <path d="M600 320 V250" stroke="#1a7a4d" stroke-width="4" fill="none"/>
 
-        <circle cx="620" cy="250" r="8" fill="gold" filter="url(#glow)" />
-        <text x="590" y="240" fill="gold" font-size="10">Flow Sensor</text>
-        <rect x="735" y="85" width="30" height="10" fill="cyan" />
-        <text x="715" y="80" fill="cyan" font-size="10">Level Sensor</text>
+        <rect x="720" y="100" width="80" height="180" fill="none" stroke="#1a7a4d" stroke-width="3"/>
+        <rect x="720" y="{280 - (t2/5*180)}" width="80" height="{(t2/5*180)}" fill="#1a7a4d" opacity="0.5"/>
+        <rect x="745" y="105" width="30" height="8" fill="cyan"/> <text x="710" y="90" fill="#fff" font-size="12">ST-102 (Level Sensor)</text>
     </svg>
     </div>
     """
-    return svg
 
-components.html(get_advanced_diagram(pump_pwm, clog, solenoid_activation, source_level, st.session_state.dest_level, flow_rate), height=420)
+components.html(get_industrial_pid(source_level, st.session_state.dest_level, main_clog, bypass_open), height=450)
 
-# التوثيق والبيانات الفنية
+# شرح القطع المضافة (التوثيق)
 st.markdown("---")
-t1, t2, t3 = st.tabs(["Strategic Objective", "Sensor Network", "Physical Integration"])
-
-with t1:
-    st.markdown("""
-    <div class="status-box">
-    <b>الهدف الاستراتيجي (Strategic Objective):</b><br>
-    بناء نظام ضخ ذكي يعتمد على "التوأم الرقمي" (Digital Twin) لتقليل الانقطاعات الصناعية. يحلل النظام الفرق بين PWM المحرك والتدفق الفعلي؛ 
-    فإذا اكتشف مقاومة عالية (انسداد)، يقوم بفتح مسار الطوارئ (XV) تلقائياً، مما يضمن استمرار العمليات في ST-102 وحماية P-101 من الإجهاد.
-    </div>
-    """, unsafe_allow_html=True)
-
-with t2:
-    st.markdown("""
-    <div class="status-box">
-    <b>شبكة الحساسات (Sensor Network):</b><br>
-    - <b>Flow Sensor:</b> يراقب كفاءة النقل اللحظية (FIT).<br>
-    - <b>Level Sensor:</b> مراقبة المخزون الاستراتيجي ومنع الفيضان (LIT).<br>
-    - <b>Diagnostic Sensor:</b> مراقبة جهد التيار PWM في ESP32 للتنبؤ بالأعطال الميكانيكية قبل وقوعها.
-    </div>
-    """, unsafe_allow_html=True)
-
-with t3:
-    st.markdown("""
-    <div class="status-box">
-    <b>التوصيل الفيزيائي (Physical Setup):</b><br>
-    1. ربط المضخة بـ <b>L298N Driver</b> للتحكم بالسرعة.<br>
-    2. ربط Solenoid Valve بـ <b>Relay</b> يتم تفعيله برمجياً.<br>
-    3. معالجة البيانات عبر <b>ESP32 Dual Core</b> لضمان استقرار قراءات الحساسات والتحكم.
-    </div>
-    """, unsafe_allow_html=True)
+st.subheader("قائمة المعدات الهندسية المحدثة (Saudi Pumps Standard)")
+st.markdown("""
+<div class="status-box">
+<b>1. Level Sensors (LIT-101/102):</b> تم إضافة حساسات فوق صوتية لكلا الخزانين لمراقبة الميزانية المائية بدقة.<br>
+<b>2. Isolation Valves (Gate V1/V2):</b> صمامات عزل قبل وبعد المضخة لتسهيل عمليات الصيانة دون تفريغ الخزانات.<br>
+<b>3. Non-Return Valve (NRV):</b> صمام عدم رجوع يمنع ارتداد الماء للمضخة عند التوقف، مما يحمي ريش المضخة من "المطرقة المائية".<br>
+<b>4. Bypass System:</b> مسار بديل مزود بصمام بوابة يدوي لضمان استمرار التدفق في حال حدوث صيانة أو انسداد في الخط الرئيسي.
+</div>
+""", unsafe_allow_html=True)
