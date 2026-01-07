@@ -1,108 +1,92 @@
 import streamlit as st
 import streamlit.components.v1 as components
 
-# الإعدادات العامة للواجهة
-st.set_page_config(page_title="SAUDI PUMPS Control Center", layout="wide")
+# --- الإعدادات العامة ---
+st.set_page_config(page_title="Saudi Pumps | Smart Interlock", layout="wide")
 
-# تنسيق CSS
 st.markdown("""
     <style>
-    .main { background-color: #040605; }
+    .main { background-color: #05070a; }
     .stMetric { 
-        background-color: #0d1117; 
-        border: 1px solid #1a7a4d; border-radius: 10px; padding: 15px;
+        background: linear-gradient(135deg, #0d1117 0%, #071a11 100%);
+        border: 1px solid #1a7a4d; border-radius: 12px; padding: 20px;
     }
-    h1, h2, h3 { color: #f0f6fc; font-family: 'Arial'; text-align: right; }
-    .status-box { 
-        padding: 20px; border-radius: 10px; border: 1px solid #1a7a4d; 
-        background: #05140b; color: #e6edf3; direction: rtl; line-height: 1.6;
-    }
+    h1 { color: #f0f6fc; text-align: center; font-family: 'Arial'; }
     </style>
     """, unsafe_allow_html=True)
 
-if 'dest_level' not in st.session_state: st.session_state.dest_level = 0.0
+if 'dest_level' not in st.session_state: st.session_state.dest_level = 0.5
 
+# --- القائمة الجانبية مع منطق الربط ---
 with st.sidebar:
-    st.markdown("<h2 style='text-align: center;'>SAUDI PUMPS</h2>", unsafe_allow_html=True)
+    st.markdown("<h2 style='color: #1a7a4d;'>SAUDI PUMPS</h2>", unsafe_allow_html=True)
     st.markdown("---")
-    # التحكم في المحاكاة
-    main_clog = st.slider("إغلاق صمام الخط الرئيسي (Main Line Gate Valve %)", 0, 100, 20)
-    bypass_open = st.checkbox("فتح صمام المسار البديل (Bypass Gate Valve)")
-    t1_level = st.slider("مستوى خزان الإمداد ST-101 (m)", 0.0, 5.0, 4.0)
     
-    if st.button("إعادة تعيين (Reset System)"):
+    source_level = st.slider("مستوى خزان الإمداد T1", 0.0, 5.0, 4.2)
+    
+    # تفعيل الـ Bypass
+    bypass_active = st.toggle("تفعيل المسار البديل (Bypass Path)", value=False)
+    
+    # إذا اشتغل الـ Bypass، الخط الرئيسي يقفل تماماً (100% انسداد)
+    if bypass_active:
+        main_valve_clog = 100
+        st.warning("⚠️ المسار الرئيسي مغلق الآن (Interlock Active)")
+    else:
+        main_valve_clog = st.slider("انسداد الصمام الرئيسي %", 0, 100, 25)
+
+    if st.button("إعادة تعيين T2"):
         st.session_state.dest_level = 0.0
 
-# حسابات التدفق بناءً على التعديلات الهندسية الجديدة
-# المسار الرئيسي يقل بالانسداد، والمسار البديل يضيف تدفقاً إذا فُتح صمام البوابة فيه
-flow_main = 10.0 * (1 - main_clog/100)
-flow_bypass = 8.0 if bypass_open else 0.0
-total_flow = flow_main + flow_bypass
+# --- حسابات التدفق ---
+flow_rate = 12.0 if bypass_active else (12.0 * (1 - main_valve_clog/100))
+if flow_rate > 0:
+    st.session_state.dest_level = min(5.0, st.session_state.dest_level + (flow_rate / 2500))
 
-# تحديث مستوى الخزان الثاني
-st.session_state.dest_level = min(5.0, st.session_state.dest_level + (total_flow / 2000))
+# --- الواجهة ---
+st.markdown("<h1>نظام التحكم التبادلي الذكي | Saudi Pumps</h1>", unsafe_allow_html=True)
 
-# العرض العلوي
-st.markdown("<h1 style='text-align: center;'>مركز التحكم والمراقبة المطور | SAUDI PUMPS</h1>", unsafe_allow_html=True)
+m1, m2, m3 = st.columns(3)
+m1.metric("معدل التدفق الحالي", f"{flow_rate:.2f} L/m")
+m2.metric("حالة الصمام الرئيسي", "مغلق تماماً" if bypass_active else f"{main_valve_clog}%")
+m3.metric("مستوى تعبئة T2", f"{(st.session_state.dest_level/5*100):.1f}%")
 
-c1, c2, c3 = st.columns(3)
-c1.metric("معدل التدفق الكلي (Total Flow)", f"{total_flow:.2f} L/m")
-c2.metric("حالة الخط الرئيسي", "منسد" if main_clog > 80 else "طبيعي")
-c3.metric("مستوى T2", f"{(st.session_state.dest_level/5*100):.1f} %")
+# --- الرسم الهندسي التفاعلي ---
+def render_interlock_pid(t1, t2, main_clog, bypass, flow):
+    main_v_color = "#ff4b4b" if bypass or main_clog > 90 else "#7a5a1a"
+    bp_v_color = "#00ff88" if bypass else "#444"
+    anim_speed = "2s" # سرعة ثابتة للمحاكاة
+    
+    svg = f"""
+    <div style="display: flex; justify-content: center; background: #0b0e14; padding: 25px; border-radius: 20px; border: 1px solid #1a7a4d;">
+    <svg width="850" height="400" viewBox="0 0 850 400">
+        <rect x="50" y="100" width="90" height="200" fill="none" stroke="#1a7a4d" stroke-width="3" rx="5"/>
+        <rect x="50" y="{300 - (t1/5*200)}" width="90" height="{(t1/5*200)}" fill="#1a7a4d" opacity="0.5"/>
+        <text x="55" y="90" fill="#fff" font-size="12">ST-101</text>
 
-# رسم الـ P&ID المطور بجميع الصمامات المطلوبة
-def get_industrial_pid(t1, t2, main_clg, bypass):
-    bp_color = "#00ff88" if bypass else "#444"
-    return f"""
-    <div style="display: flex; justify-content: center; background: #0d1117; padding: 20px; border-radius: 15px; border: 1px solid #1a7a4d;">
-    <svg width="900" height="400" viewBox="0 0 900 400">
-        <rect x="50" y="100" width="80" height="180" fill="none" stroke="#1a7a4d" stroke-width="3"/>
-        <rect x="50" y="{280 - (t1/5*180)}" width="80" height="{(t1/5*180)}" fill="#1a7a4d" opacity="0.5"/>
-        <rect x="75" y="105" width="30" height="8" fill="cyan"/> <text x="40" y="90" fill="#fff" font-size="12">ST-101 (Level Sensor)</text>
+        <rect x="700" y="100" width="90" height="200" fill="none" stroke="#1a7a4d" stroke-width="3" rx="5"/>
+        <rect x="700" y="{300 - (t2/5*200)}" width="90" height="{(t2/5*200)}" fill="#1a7a4d" opacity="0.5"/>
+        <text x="705" y="90" fill="#fff" font-size="12">ST-102</text>
 
-        <path d="M130 250 H180" stroke="#1a7a4d" stroke-width="4"/>
-        <polygon points="140,240 160,260 160,240 140,260" fill="white" stroke="white"/>
-        <text x="135" y="235" fill="#aaa" font-size="9">Gate V1</text>
+        <path d="M140 250 H230 M310 250 H380 V180 H620 M380 250 V320 H620 M620 180 V250 H700 M620 320 V250" 
+              stroke="#2d2d2d" stroke-width="10" fill="none"/>
 
-        <path d="M180 250 H240" stroke="#1a7a4d" stroke-width="4"/>
-        <polygon points="200,240 220,260 220,240 200,260" fill="white" stroke="white"/>
-        <text x="195" y="235" fill="#aaa" font-size="9">Gate V2</text>
+        <g>
+            {f'<circle r="4" fill="#00ff88"><animateMotion path="M140 250 H230 M310 250 H380 V180 H620 V250 H700" dur="{anim_speed}" repeatCount="indefinite" /></circle>' if not bypass and main_clog < 100 else ''}
+            
+            {f'<circle r="4" fill="#00ff88"><animateMotion path="M140 250 H230 M310 250 H380 V320 H620 V250 H700" dur="{anim_speed}" repeatCount="indefinite" /></circle>' if bypass else ''}
+        </g>
 
-        <circle cx="280" cy="250" r="30" fill="#05140b" stroke="#fff" stroke-width="2"/>
-        <text x="265" y="255" fill="#fff" font-size="10" font-weight="bold">P-101</text>
+        <circle cx="270" cy="250" r="35" fill="#05140b" stroke="#fff" stroke-width="2"/>
+        <text x="255" y="255" fill="#fff" font-size="10">P-101</text>
 
-        <path d="M310 250 H360" stroke="#1a7a4d" stroke-width="4"/>
-        <polygon points="320,240 340,250 320,260" fill="none" stroke="gold" stroke-width="2"/>
-        <text x="315" y="235" fill="gold" font-size="9">NRV (عدم رجوع)</text>
+        <rect x="470" y="170" width="40" height="20" fill="{main_v_color}" stroke="#fff"/>
+        <text x="450" y="165" fill="#fff" font-size="10">الصمام الرئيسي</text>
 
-        <path d="M360 250 H420 V180 H600 M420 250 V320 H600" stroke="#1a7a4d" stroke-width="4" fill="none"/>
-        
-        <rect x="480" y="170" width="30" height="20" fill="#7a5a1a"/>
-        <text x="460" y="165" fill="#fff" font-size="9">Main Gate V ({main_clg}%)</text>
-
-        <rect x="480" y="310" width="30" height="20" fill="{bp_color}"/>
-        <text x="460" y="305" fill="{bp_color}" font-size="9">Bypass Gate V</text>
-
-        <path d="M600 180 V250 H720" stroke="#1a7a4d" stroke-width="4" fill="none"/>
-        <path d="M600 320 V250" stroke="#1a7a4d" stroke-width="4" fill="none"/>
-
-        <rect x="720" y="100" width="80" height="180" fill="none" stroke="#1a7a4d" stroke-width="3"/>
-        <rect x="720" y="{280 - (t2/5*180)}" width="80" height="{(t2/5*180)}" fill="#1a7a4d" opacity="0.5"/>
-        <rect x="745" y="105" width="30" height="8" fill="cyan"/> <text x="710" y="90" fill="#fff" font-size="12">ST-102 (Level Sensor)</text>
+        <rect x="470" y="310" width="40" height="20" fill="{bp_v_color}" stroke="#fff"/>
+        <text x="450" y="305" fill="{bp_v_color}" font-size="10">صمام الـ Bypass</text>
     </svg>
     </div>
     """
+    return svg
 
-components.html(get_industrial_pid(source_level, st.session_state.dest_level, main_clog, bypass_open), height=450)
-
-# شرح القطع المضافة (التوثيق)
-st.markdown("---")
-st.subheader("قائمة المعدات الهندسية المحدثة (Saudi Pumps Standard)")
-st.markdown("""
-<div class="status-box">
-<b>1. Level Sensors (LIT-101/102):</b> تم إضافة حساسات فوق صوتية لكلا الخزانين لمراقبة الميزانية المائية بدقة.<br>
-<b>2. Isolation Valves (Gate V1/V2):</b> صمامات عزل قبل وبعد المضخة لتسهيل عمليات الصيانة دون تفريغ الخزانات.<br>
-<b>3. Non-Return Valve (NRV):</b> صمام عدم رجوع يمنع ارتداد الماء للمضخة عند التوقف، مما يحمي ريش المضخة من "المطرقة المائية".<br>
-<b>4. Bypass System:</b> مسار بديل مزود بصمام بوابة يدوي لضمان استمرار التدفق في حال حدوث صيانة أو انسداد في الخط الرئيسي.
-</div>
-""", unsafe_allow_html=True)
+components.html(render_interlock_pid(source_level, st.session_state.dest_level, main_valve_clog, bypass_active, flow_rate), height=450)
