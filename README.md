@@ -17,7 +17,7 @@
 
 ---
 
-## 📐 Engineering P&ID (Piping & Instrumentation Diagram)
+## Engineering P&ID (Piping & Instrumentation Diagram)
 The system is built on a professional P&ID architecture, ensuring all components adhere to industrial standards:
 
 1.  **Pump (P-101):** The primary mover (Centrifugal Pump) responsible for hydraulic energy transfer.
@@ -65,5 +65,5 @@ To run the Digital Twin locally:
     ```
 
 ---
-## 📄 License
+## License
 This project is open-source and licensed under the **MIT License**.
